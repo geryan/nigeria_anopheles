@@ -204,7 +204,8 @@ dat <- dat %>%
   filter(!is.na(Long), !is.na(Lat)) %>% # this loses 3 points
   filter(Long !=0, Lat !=0) # loses another 11 points
 
-plot(dat$Long, dat$Lat)
+plot(nigeria_mask)
+points(dat$Long, dat$Lat)
 
 
 coords <- dat[, c("Long", "Lat")] %>%
@@ -263,9 +264,9 @@ write_csv(
 # missing lat longs
 # IRM 2020 93-94 repeated
 # CDC 2020 60-61 in original sheet (in NG edited sheet: 57-58) same day repeated (though different count on same day)
-# Italics in months  - does it mean anyting?
+# Italics in months  - does it mean anything?
 # CDC 2020 line 49 coustani presence listed as absence in PA
-# multiple spelling of presence v Presence
+# multiple spelling of presence v Presence?
 
 # fixable by code:
 ## Inconsistent species names
