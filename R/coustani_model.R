@@ -74,17 +74,20 @@ m_gam <- gam(presence_absence ~ survey_type + s(aspect1) + s(bio1) + s(bio10) + 
 draw(m_gam) &
   theme_minimal()
 
-
-class(p)
-
 pred_gam <- terra::predict(pred_covs, m_gam, type = "response")
 
 
+
 plot(pred_gam)
-points(coords)
+points(coords, col = "grey80", pch = 16)
+points(coords[df_occ$presence_absence == 1,], col = "black", pch = 16)
 
 writeRaster(
   pred_gam,
-  "output/prediction_gam.tif",
+  sprintf(
+    "output/prediction_gam_%s.tif",
+    target_species_print
+  ),
   overwrite = TRUE
 )
+
