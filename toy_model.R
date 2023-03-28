@@ -1,3 +1,5 @@
+
+
 covs <- bc_nigeria[[c(4,5,7)]]
 names(covs) <- c("tseas", "tmax", "trange")
 

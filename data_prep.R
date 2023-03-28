@@ -99,10 +99,173 @@ terra::writeRaster(
 
 terra::writeRaster(
   x = bc_nigeria,
-  filename = "data/grids/nigeria_kenya.tif"
+  filename = "data/grids/bc_nigeria.tif"
 )
 
 # terra::writeRaster(
 #   x = rescale_travel,
 #   filename = "data/grids/rescale_travel.tif"
 # )
+##
+
+library(stringr)
+
+rasterfiles <- list.files(
+  path = "data/grids/Clipped_Layers/",
+  pattern = ".tif$",
+  full.names = TRUE
+)
+
+
+covs <- rast(rasterfiles)
+
+writeRaster(
+  covs,
+  filename = "data/grids/covariates.grd"
+)
+
+covs <- rast("data/grids/covariates.grd")
+
+nigeria_mask <- covs[[1]]*0
+names(nigeria_mask) <- "mask"
+
+writeRaster(
+  nigeria_mask,
+  "data/grids/nigeria_mask.grd"
+)
+
+#### Occupancy data
+library(readxl)
+# this is NG edit
+sheets <- readxl::excel_sheets("data/tabular/Data_for_Modeling_Other_species_27_03_2023_NG_edit.xlsx")
+
+# NG edit
+all_data <- lapply(
+  X = sheets,
+  FUN = function(x){
+    read_excel(
+      path = "data/tabular/Data_for_Modeling_Other_species_27_03_2023_NG_edit.xlsx",
+      sheet = x,
+      col_types = "text"
+    )
+  }
+)
+
+# names(all_data) <- sheets
+# str(all_data)
+
+year <- sheets %>%
+  sub(".* ", "", .)
+
+type <- sheets %>%
+  sub(" .*", "", .)
+
+library(purrr)
+dat <- tibble(
+  year,
+  type,
+  data = all_data
+) %>%
+  mutate(
+    data = map2(
+      .x = data,
+      .y = year,
+      .f = function(x, y){
+        z <- x %>% mutate(
+          Collection_Year = y
+        )
+        if("...1" %in% colnames(z)){
+          z <- z %>%
+            rename("State" = "...1")
+        }
+        z
+      }
+    )
+  ) %>%
+  filter(type == "IRM" | (type == "CDC" & year == "2020")) %>% # because of missing state column
+  unnest(data) %>%
+  rename(survey_type = `Survey type`) %>%
+  filter(sp != "Presence") %>% # switched presence and absences in IRM 2022
+  mutate(
+    sp = sub(
+      "A. ",
+      "An. ",
+      sp
+    ),
+    sp = if_else(sp == "An.pharoensis", "An. pharoensis", sp)
+  ) %>% # fix inconsistent names
+  mutate(
+    Lat = as.numeric(Lat),
+    Long = as.numeric(Long)
+  )
+
+
+dat <- dat %>%
+  filter(!is.na(Long), !is.na(Lat)) %>% # this loses 3 points
+  filter(Long !=0, Lat !=0) # loses another 11 points
+
+plot(dat$Long, dat$Lat)
+
+
+coords <- dat[, c("Long", "Lat")] %>%
+  as.matrix()
+
+values <- terra::extract(nigeria_mask, coords)
+
+bad_coords <- is.na(values)
+
+dat <- dat[!bad_coords,] # removing coords outside of Nigera raster boundary
+
+# NB a couple of points appear not to be within the boundary of Nigeria
+plot(elevation)
+points(dat$Long, dat$Lat)
+
+samples <- dat %>%
+  select(year, type, State, Site, Lat, Long, Date, Collection_Month, Collection_Year, survey_type) %>%
+  distinct()
+
+species <- unique(dat$sp)
+
+
+sp_samples <- expand_grid(sp = species, samples) %>%
+  filter(sp != "absence")
+
+sp_pres <- dat %>%
+  filter(sp != "absence") %>%
+  select(-Number) %>%
+  distinct() %>% # removing duplicate presences for same date
+  mutate(PA = "presence") # fixes P p presence and incorrect "absence" in PA
+
+
+clean_dat <- left_join(
+  x = sp_samples,
+  y = sp_pres,
+  by = colnames(sp_samples)
+  ) %>%
+  mutate(
+    PA = case_when(
+      is.na(PA) ~ "absence",
+      TRUE ~ PA
+    )
+  )
+
+table(clean_dat$PA, clean_dat$sp)
+
+write_csv(
+  clean_dat,
+  file = "data/tabular/cleaned_data.csv"
+)
+
+# to fix - Biodun
+# IRM 2022 lines 32-37 sp and PA in wrong column
+# formatting of CDC and PSC - need state column see NG edit example CDC 2020
+# data points outside of Nigeria
+# missing lat longs
+# IRM 2020 93-94 repeated
+# CDC 2020 60-61 in original sheet (in NG edited sheet: 57-58) same day repeated (though different count on same day)
+# Italics in months  - does it mean anyting?
+# CDC 2020 line 49 coustani presence listed as absence in PA
+# multiple spelling of presence v Presence
+
+# fixable by code:
+## Inconsistent species names

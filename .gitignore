@@ -27,4 +27,8 @@ vignettes/*.pdf
 # R Environment Variables
 .Renviron
 *.tif
-.DS_Store
+*.DS_Store
+*.csv
+*.grd
+
+/data
