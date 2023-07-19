@@ -123,7 +123,8 @@ covs <- rast(rasterfiles)
 
 writeRaster(
   covs,
-  filename = "data/grids/covariates.grd"
+  filename = "data/grids/covariates.grd",
+  overwrite = TRUE
 )
 
 covs <- rast("data/grids/covariates.grd")
@@ -133,61 +134,53 @@ names(nigeria_mask) <- "mask"
 
 writeRaster(
   nigeria_mask,
-  "data/grids/nigeria_mask.grd"
+  "data/grids/nigeria_mask.grd",
+  overwrite = TRUE
 )
 
 #### Occupancy data
 library(readxl)
 # this is NG edit
-sheets <- readxl::excel_sheets("data/tabular/Data_for_Modeling_Other_species_27_03_2023_NG_edit.xlsx")
+#sheets <- readxl::excel_sheets("data/tabular/Data_for_Modeling_Other_species_27_03_2023_NG_edit.xlsx")
 
-# NG edit
-all_data <- lapply(
-  X = sheets,
-  FUN = function(x){
-    read_excel(
-      path = "data/tabular/Data_for_Modeling_Other_species_27_03_2023_NG_edit.xlsx",
-      sheet = x,
-      col_types = "text"
-    )
-  }
+sheets <- readxl::excel_sheets("data/tabular/Merged_Data.xlsx")
+sheets
+
+file <- "data/tabular/Merged_Data.xlsx"
+
+raw_data <- read_excel(
+  path = file,
+  sheet = "All_merged",
+  #col_types = "text"
 )
 
-# names(all_data) <- sheets
-# str(all_data)
-
-year <- sheets %>%
-  sub(".* ", "", .)
-
-type <- sheets %>%
-  sub(" .*", "", .)
-
-library(purrr)
-dat <- tibble(
-  year,
-  type,
-  data = all_data
-) %>%
+data_checked <- raw_data %>%
   mutate(
-    data = map2(
-      .x = data,
-      .y = year,
-      .f = function(x, y){
-        z <- x %>% mutate(
-          Collection_Year = y
-        )
-        if("...1" %in% colnames(z)){
-          z <- z %>%
-            rename("State" = "...1")
-        }
-        z
-      }
-    )
-  ) %>%
-  filter(type == "IRM" | (type == "CDC" & year == "2020")) %>% # because of missing state column
-  unnest(data) %>%
+    sp = case_when(
+      # where PA is absence, make sp = Absence
+      PA == "Absence" ~ "Absence",
+      .default = sp
+    ),
+    PA = case_when(
+      # where a non-zero number is recorded and the species isn't listed as
+      # Absence, make it a Presence
+      Number > 0 & sp != "Absence" ~ "Presence",
+      # where a zero number is recorded and the species is listed as
+      # Absence, make it an Absence
+      Number == 0 & sp == "Absence" ~ "Absence",
+      .default = PA
+    ),
+    inconsistent = case_when(
+      PA == "Presence" & sp == "Absence" ~ TRUE,
+      is.na(`Survey type`) ~ TRUE,
+      .default = FALSE
+    ))
+
+all_data <- data_checked %>%
+  filter(!inconsistent)
+
+dat <-  all_data %>%
   rename(survey_type = `Survey type`) %>%
-  filter(sp != "Presence") %>% # switched presence and absences in IRM 2022
   mutate(
     sp = sub(
       "A. ",
@@ -201,43 +194,44 @@ dat <- tibble(
     Long = as.numeric(Long)
   )
 
-
-dat <- dat %>%
-  filter(!is.na(Long), !is.na(Lat)) %>% # this loses 3 points
-  filter(Long !=0, Lat !=0) # loses another 11 points
+#
+# dat <- dat %>%
+#   filter(!is.na(Long), !is.na(Lat)) %>% # this loses 3 points
+#   filter(Long !=0, Lat !=0) # loses another 11 points # fixed
 
 plot(nigeria_mask)
 points(dat$Long, dat$Lat)
 
 
-coords <- dat[, c("Long", "Lat")] %>%
-  as.matrix()
+# coords <- dat[, c("Long", "Lat")] %>%
+#   as.matrix()
+#
+# values <- terra::extract(nigeria_mask, coords)
+#
+# bad_coords <- is.na(values)
+#
+# dat <- dat[!bad_coords,] # removing coords outside of Nigera raster boundary # fixed
 
-values <- terra::extract(nigeria_mask, coords)
 
-bad_coords <- is.na(values)
 
-dat <- dat[!bad_coords,] # removing coords outside of Nigera raster boundary
-
-# NB a couple of points appear not to be within the boundary of Nigeria
 plot(elevation)
 points(dat$Long, dat$Lat)
 
 samples <- dat %>%
-  select(year, type, State, Site, Lat, Long, Date, Collection_Month, Collection_Year, survey_type) %>%
+  select(STATE, Site, Lat, Long, Collection_Month, Collection_Year, survey_type) %>%
   distinct()
 
 species <- unique(dat$sp)
 
 
 sp_samples <- expand_grid(sp = species, samples) %>%
-  filter(sp != "absence")
+  filter(sp != "Absence")
 
 sp_pres <- dat %>%
-  filter(sp != "absence") %>%
+  filter(sp != "Absence") %>%
   select(-Number) %>%
   distinct() %>% # removing duplicate presences for same date
-  mutate(PA = "presence") # fixes P p presence and incorrect "absence" in PA
+  mutate(PA = "Presence") # fixes P p presence and incorrect "absence" in PA
 
 
 clean_dat <- left_join(
