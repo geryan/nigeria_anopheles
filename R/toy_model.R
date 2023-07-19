@@ -68,3 +68,30 @@ writeRaster(
   "output/prediction_gam.tif",
   overwrite = TRUE
 )
+
+
+
+
+## BRT
+
+library(gbm)
+library(dismo)
+
+m_brt_step <- gbm.step(
+  data = df,
+  gbm.x = 2:ncol(df),
+  gbm.y = 1,
+  family = "bernoulli",
+  tree.complexity = 4,
+  learning.rate = 0.01,
+  bag.fraction = 0.5,
+)
+
+gbm.plot(m_brt_step, n.plots = 6, write.title = FALSE)
+
+
+pred_brt <- terra::predict(
+  pred_covs,
+  m_brt_step,
+  type = "response"
+)
