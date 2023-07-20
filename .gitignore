@@ -34,3 +34,5 @@ vignettes/*.pdf
 /data
 *.DS_STORE
 *.rds
+
+*.png

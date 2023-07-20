@@ -106,8 +106,22 @@ writeRaster(
 )
 
 plot(pred_glmnet)
-points(coords, col = "grey80", pch = 16)
+points(coords, bg = "grey80", pch = 21)
 points(coords[df_occ$presence_absence == 1,], col = "black", pch = 16)
+
+png(
+  filename = sprintf(
+    "output/figures/plot_pred_glmnet_%s.png",
+    target_species_print
+  ),
+  width = 3600,
+  height = 2000,
+  res = 300
+)
+plot(pred_glmnet)
+points(coords, bg = "grey80", pch = 21)
+points(coords[df_occ$presence_absence == 1,], col = "black", pch = 16)
+dev.off()
 
 # which covariates are important?
 coefs_matrix <- t(m_glmnet$glmnet.fit$beta[, m_glmnet$index["1se", ]])
@@ -126,5 +140,6 @@ write_csv(
     target_species_print
   )
 )
+
 
 
