@@ -2,16 +2,16 @@ library(tidyverse)
 library(terra)
 library(glmnet)
 
-target_species <- "An. coustani"
+target_species <- "An. rufipes"
 target_species_print <- gsub("An. ", "", target_species)
 
 covs_keep <- c(
   paste0("bio", c(1:3, 9, 13, 14, 19)),
-         "elevation",
-         "slope1",
-         "aspect1",
-         "hillshade1"
-  )
+  "elevation",
+  "slope1",
+  "aspect1",
+  "hillshade1"
+)
 
 
 covs <- rast("data/grids/covariates.grd")
@@ -52,8 +52,7 @@ df <- cbind(df_pres, df_covs)
 pred_covs <- covs
 
 x <- model.matrix(
-  ~ 1 +
-    survey_type +
+  ~ survey_type +
     bio1 +
     bio2 +
     bio3 +
@@ -65,10 +64,7 @@ x <- model.matrix(
     slope1 +
     aspect1 +
     hillshade1,
-  data = df) %>%
-  as_tibble() %>%
-  dplyr::select(-`(Intercept)`) %>%
-  as.matrix()
+  data = df)
 
 m_glmnet <- cv.glmnet(
   x,
@@ -81,10 +77,10 @@ m_glmnet <- cv.glmnet(
 all_cells <- which(!is.na(as.vector(nigeria_mask)))
 pred_covs_df <- extract(pred_covs, all_cells) %>%
   bind_cols(
-    tibble(
+    tibble(`(Intercept)` = 1,
            `survey_typeLarval Survey` = 1,
            `survey_typePyrethrum Spray Catches` = 0
-           ),
+    ),
     .
   ) %>%
   as.matrix()
@@ -106,7 +102,7 @@ writeRaster(
 )
 
 plot(pred_glmnet)
-points(coords, col = "grey80", pch = 16)
+points(coords, bg = "grey80", pch = 21)
 points(coords[df_occ$presence_absence == 1,], col = "black", pch = 16)
 
 # which covariates are important?

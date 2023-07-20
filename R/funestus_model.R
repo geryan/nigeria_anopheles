@@ -1,149 +1,126 @@
 library(tidyverse)
 library(terra)
-library(mgcv)
-library(gratia)
+library(glmnet)
 
-target_species <- "An. coustani"
+target_species <- "An. funestus"
 target_species_print <- gsub("An. ", "", target_species)
+
+covs_keep <- c(
+  paste0("bio", c(1:3, 9, 13, 14, 19)),
+  "elevation",
+  "slope1",
+  "aspect1",
+  "hillshade1"
+)
 
 
 covs <- rast("data/grids/covariates.grd")
+covs <- covs[[covs_keep]]
+covs <- scale(covs)
 nigeria_mask <- rast("data/grids/nigeria_mask.grd")
-plot(covs)
-
-# df_occ <- data.frame(
-#   presence_absence = rbinom(150, 1, 0.3),
-#   survey_type = rep(c("IRM", "CDC", "PSC"), each = 50),
-#   latitude = runif(150, 6.6, 12.4),
-#   longitude = runif(150, 3.7, 9.1)
-# )
 
 df_all <- read_csv("data/tabular/cleaned_data.csv")
 
 df_occ <- df_all %>%
   filter(sp == target_species) %>%
   mutate(
-    presence_absence = if_else(PA == "Presence", 1, 0) # this is necessary to fit model
+    presence_absence = if_else(PA == "Presence", 1, 0), # this is necessary to fit model
+    survey_type = factor(survey_type)
   )
+
+# filter down to whether each species was ever detected at each location
+df_occ <- df_occ %>%
+  group_by(
+    sp, Lat, Long, STATE, Site, survey_type
+  ) %>%
+  summarise(
+    presence_absence = max(presence_absence),
+    .groups = "drop"
+  )
+
+table(df_occ$presence_absence)
 
 coords <- df_occ[, c("Long", "Lat")]
 
-df_covs <- terra::extract(covs, coords)
-
+df_covs <- terra::extract(covs, coords) %>%
+  dplyr::select(-ID)
 
 df_pres <- df_occ[, c("presence_absence", "survey_type")]
 
 df <- cbind(df_pres, df_covs)
 
-pred_method <- nigeria_mask
-cls <- data.frame(id = 0, survey_type = c("Larval Survey"))
-levels(pred_method) <- cls
+pred_covs <- covs
 
-pred_covs <- c(covs, pred_method)
+x <- model.matrix(
+  ~ survey_type +
+    bio1 +
+    bio2 +
+    bio3 +
+    bio9 +
+    bio13 +
+    bio14 +
+    bio19 +
+    elevation +
+    slope1 +
+    aspect1 +
+    hillshade1,
+  data = df)
 
-head(df)
+m_glmnet <- cv.glmnet(
+  x,
+  df$presence_absence,
+  nfolds = nrow(x),
+  grouped = FALSE,
+  family = "binomial"
+)
 
-## GLM
+all_cells <- which(!is.na(as.vector(nigeria_mask)))
+pred_covs_df <- extract(pred_covs, all_cells) %>%
+  bind_cols(
+    tibble(`(Intercept)` = 1,
+           `survey_typeLarval Survey` = 1,
+           `survey_typePyrethrum Spray Catches` = 0
+    ),
+    .
+  ) %>%
+  as.matrix()
 
-m_glm <- glm(presence_absence ~ survey_type + aspect1 + bio1 + bio10 + bio11 + bio12 + bio13 + bio14 + bio15 + bio16 + bio17 + bio18 + bio19 + bio2 + bio3 + bio4 + bio5 + bio6 + bio7 + bio8 + bio9 + elevation + hillshade1 + slope1,
-             family = binomial,
-             data = df)
+pred_glmnet_df <- predict(m_glmnet, pred_covs_df,
+                          type = "response")
 
-pred_glm <- terra::predict(pred_covs, m_glm, type = "response")
-
-plot(pred_glm)
-points(coords, col = "grey80", pch = 16)
-points(coords[df_occ$presence_absence == 1,], col = "black", pch = 16)
+pred_glmnet <- nigeria_mask
+names(pred_glmnet) <- "lyr1"
+pred_glmnet[all_cells] <- pred_glmnet_df
 
 writeRaster(
-  pred_glm,
+  pred_glmnet,
   sprintf(
-    "output/prediction_glm_%s.tif",
+    "output/prediction_glmnet_%s.tif",
     target_species_print
   ),
   overwrite = TRUE
 )
 
-## GAM
-# m_gam <- gam(presence_absence ~ survey_type + s(aspect1) + s(bio1) + s(bio10) + s(bio11) + s(bio12) + s(bio13) + s(bio14) + s(bio15) + s(bio16) + s(bio17) + s(bio18) + s(bio19) + s(bio2) + s(bio3) + s(bio4) + s(bio5) + s(bio6) + s(bio7) + s(bio8) + s(bio9) + s(elevation) + s(hillshade1) + s(slope1),
-#              select = TRUE,
-#              family = binomial,
-#              data = df)
-
-m_gam <- gam(
-  presence_absence ~ #survey_type +
-    s(aspect1) +
-    s(bio1) +
-    s(bio10) +
-    s(bio11) +
-    s(bio12) +
-    s(bio13) +
-    s(bio14) +
-    s(bio15) +
-    s(bio16) +
-    s(bio17) +
-    s(bio18) +
-    s(bio19) +
-    s(bio2) +
-    s(bio3) +
-    s(bio4) +
-    s(bio5) +
-    s(bio6) +
-    s(bio7) +
-    s(bio8) +
-    s(bio9) +
-    s(elevation) +
-    s(hillshade1) +
-    s(slope1),
-  select = TRUE,
-  family = binomial,
-  data = df
-)
-
-
-
-draw(m_gam) &
-  theme_minimal()
-
-pred_gam <- terra::predict(pred_covs, m_gam, type = "response")
-
-plot(pred_gam)
-points(coords, col = "grey80", pch = 16)
+plot(pred_glmnet)
+points(coords, bg = "grey80", pch = 21)
 points(coords[df_occ$presence_absence == 1,], col = "black", pch = 16)
 
-writeRaster(
-  pred_gam,
+# which covariates are important?
+coefs_matrix <- t(m_glmnet$glmnet.fit$beta[, m_glmnet$index["1se", ]])
+coefs <- as.vector(coefs_matrix)
+names(coefs) <- colnames(coefs_matrix)
+coefs_keep <- coefs != 0 & !grepl("survey_type", names(coefs))
+important_coefs <- sort(coefs[coefs_keep]) %>%
+  t() %>%
+  as_tibble()
+important_coefs
+
+write_csv(
+  important_coefs,
   sprintf(
-    "output/prediction_gam_%s.tif",
+    "output/coefs_glmnet_%s.csv",
     target_species_print
-  ),
-  overwrite = TRUE
+  )
 )
 
-# boosted regression tree
-library(gbm)
-library(dismo)
-m_brt_step <- gbm.step(
-  data = df,
-  gbm.x = 4:26,
-  gbm.y = 1,
-  family = "bernoulli",
-  tree.complexity = 5,
-  learning.rate = 0.01,
-  bag.fraction = 0.5
-)
-
-gbm.plot(m_brt_step, n.plots = 12)
-
-
-pred_brt <- terra::predict(
-  pred_covs,
-  m_brt_step,
-  type = "response"
-)
-
-
-plot(pred_brt)
-points(coords, col = "grey80", pch = 16)
-points(coords[df_occ$presence_absence == 1,], col = "black", pch = 16)
 
